@@ -10,7 +10,7 @@ The agent's movement follows the excluded volume rule, whereby agents cannot ove
 
 Make sure to install the Mesa Python library
 ~~~
-pip install mesa==2.1.5
+pip install mesa==2.2.2
 ~~~
 
 Once all dependencies are installed, run the model using the following command, which will launch an interactive server:
