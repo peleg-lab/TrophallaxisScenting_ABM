@@ -1,4 +1,4 @@
-# Trophallaxis_ABM
+# TrophallaxisScenting_ABM
 
 ## Summary
 
