@@ -9,8 +9,8 @@ import globals
 # specific_agents = model.agents.select(lambda agent:)
 
 class Bee(mesa.Agent):
-    def __init__(self, unique_id, model, x, y,
-                 A_, wb_, thresh_, trans_prob_,):
+    def __init__(self, unique_id, model, x, y, #A_, 
+                 wb_, fan_threshold_, fan_trans_prob_,):
                  # scent_thresh, scent_prob):
         super().__init__(unique_id, model)
         self.type = 0
@@ -25,7 +25,6 @@ class Bee(mesa.Agent):
 
         ## Food attributes:
         self.hungry = True
-        # self.occupied = False
         self.food = 0
         self.counts = 0
 
@@ -38,78 +37,96 @@ class Bee(mesa.Agent):
         self.dist_to_neighbors = None
 
         ## Scenting:
-        self.wb = wb_   # 10.0
-        self.threshold = thresh_ # * 0.01
-        self.A = A_ # * 0.0575
-        # grads
+        self.wb = wb_                       # worker bias
+        self.threshold = fan_threshold_     # worker threshold for fanning (scenting)
+        self.A = 0.0575 #10.0 #A_                         # emission amount [NOW CONSTANT = 1.0]
+        # self.A = 1.0
+        ## grads
         self.grad_x = 0.0
         self.grad_y = 0.0
         self.wx = 0
         self.wy = 0
         self.Cs = []
-        self.distances = []     # remove?
+        # self.distances = []                                           [REMOVE?]
         self.total_C = 0
         self.total_grads = np.array([0.0, 0.0])
-        # counters
+        ## counters
         self.timestep = 0
         self.wait_timestep = 0
-        # state and flags
+        ## state and flags
         self.state = 0
         self.next_state = None
         self.prev_state = None
         self.threshold_met = False
-        # other:
-        self.emission_frequency = 80
-        self.sensations = []
-        self.trans_prob = trans_prob_ #0.5
-        self.wait_period = 80   # original value = 80
+        ## other:
+        self.emission_frequency = 80      # emission frequency (duration) for FED bees
+        self.wait_period = 80             # duration of scenting/wait period for UNFED bees (original value = 80)
+        # self.sensations = []
+        self.trans_prob = fan_trans_prob_   # probability to scenting (if threshold met)
 
-        # ## Checks:
+        self.signal_wait_period = 5
+        self.signal_wait_count = 0
+
+        ## Sensitivity Mode/Special Modes:
+        self.sensitivity_mode = 1    # mode for determining sensation effects
+        self.dont_move = False
+
+        #### TO BE REMOVED LATER ####
+        # self.grad_x_old = 0.0
+        # self.grad_y_old = 0.0
+        # self.total_C_old = 0
+        # self.total_grads_old = np.array([0.0, 0.0])
+
+        ## Checks:
         self.zero = False
 
     # __init__()
 
     def step(self):
+        if self.dont_move:
+            self.state = self.next_state
+            return
+        
         self.old_x = self.pos[0]
         self.old_y = self.pos[1]
 
-        # ### for NO SCENTING RUN: ###
-        # if self.next_state == -1 or self.next_state == 1 or self.next_state == 2:
-        #     self.next_state = 0
-        if self.food > 0 and self.next_state == -1:
-            self.next_state = 0
-        # ############################
-
-        ## Orient heading if about to scent:
-        if self.next_state == 2 and self.state != self.next_state:
+        ## Orient heading if about to scent (state !=2 && next_state == 2)
+        if self.next_state == 1 and self.state != self.next_state:
             if self.grad_x != 0 and self.grad_y != 0:
                 self.set_heading_vector(self.grad_x, self.grad_y)
 
-        ## Do nothing if emitting or waiting, else do one of these
-        if self.state == -1 and self.state != self.next_state and self.counts == 0:     # if exiting occupied state
-            # print(self.model.t_i, " -- -- ", self.next_state)
+        ## SPECIAL MODE: disable food exchange
+        if self.model.disable_trophallaxis:
+            ## skip food exchange, just move
+            if self.next_state == -1:
+                print("ERROR: step() - agent in occupied state")
             self.state = self.next_state
             self.attempt_move()
-        elif self.state != -1 and self.state != 1 and self.state != 2:       # if not emitting or waiting
+
+        ## STANDARD MODE:
+        ## do nothing if emitting or waiting, else do one of these
+        elif self.state == -1 and self.state != self.next_state and self.counts == 0:     # if exiting occupied state (state -1 && next_state != -1)
+            self.state = self.next_state
+            self.attempt_move()
+        ## check neighbors or move
+        elif self.state != -1 and self.state != 1 and self.state != 2:       # if not emitting or waiting (state 1 or 2)
             ## Update state:
             self.state = self.next_state
             ## Search for nearby agents for trophallaxis:
-            self.nearby_agents = []#, self.dist_to_neighbors = self.get_neighbors(1.1)      ## *[ change this line for NO TROPHALLAXIS RUN ]*
+            self.nearby_agents, self.dist_to_neighbors = self.get_neighbors(1.1)      #### [ change this line for NO TROPHALLAXIS RUN ] ####
             if len(self.nearby_agents) > 0:
                 ## Pick target to attempt food exchange:
                 target = self.nearby_agents[np.argmin(self.dist_to_neighbors)]
                 if target:
                     globals.n3_counter += 1
-                    # if not target.occupied:
-                    if target.state != -1:      # if target is not occupied
+                    if target.state != -1:      # if target is not occupied (target.state != -1)
                         globals.n2_counter += 1
                         globals.delta_food = (self.food - target.food)
                         if globals.delta_food != 0:
                             globals.n1_counter += 1
                         if globals.delta_food > self.model.troph_thresh:     ####
                             globals.tro_counter += 1
-                            # self.occupied = True
-                            self.state = -1         # go to occupied state
+                            self.state = -1         # go to occupied state (-1)
                             self.delta_t = np.round((globals.delta_food / 2) / globals.food_transfer_rate)
                             self.counts = self.delta_t
                             self.exchange_food(target)
@@ -129,6 +146,16 @@ class Bee(mesa.Agent):
         if self.state != 2:
             self.__clear()
     # step()
+
+    def step_queen(self):
+        ## queen step function
+        ##  - no movement
+        ##  - only swap between emit and wait (state 2 and 4)
+        if self.next_state == -1 or self.next_state == 0 or self.next_state == 3:
+            print("ERROR: step_queen() - invalid queen state " + str(self.next_state))
+            self.next_state = 2
+        self.state = self.next_state
+    # step_queen()
 
     ########################
     ### Heading Helpers: ###
@@ -155,9 +182,13 @@ class Bee(mesa.Agent):
         self.heading = self.normalize_heading(new_head)
     # set_heading()
 
+    # def set_heading_vector(self, dx, dy):
+    #     h2 = math.atan2(dy, dx)
+    #     return self.normalize_heading(h2)
+    
     def set_heading_vector(self, dx, dy):
         h2 = math.atan2(dy, dx)
-        return self.normalize_heading(h2)
+        self.heading = self.normalize_heading(h2)       ## fixed so it properly updates self.heading
 
     ##########################
     ### Movement Function: ###
@@ -166,21 +197,25 @@ class Bee(mesa.Agent):
     ## Only move if random walk or directed walk
     #  - do nothing if emitting or waiting
     def attempt_move(self):
-        if self.food == 0:      ### [ REMOVE for QUEEN FINDING RUN ]
-            ## Random Walk:
-            if self.state == 0 or self.state == 4:
-                ## Update heading:
-                self.update_heading(0, self.model.theta)
-                ## Move:
-                self.forward(1.0)
+        # if self.model.fixed_fed_bees and food == 0:      ### [ REMOVE for QUEEN FINDING RUN ]
+        ## Random Walk:
+        ## - unfed state 0
+        ## - fed state 0 or 4
+        if self.state == 0 or self.state == 4:
+            ## Update heading:
+            self.update_heading(0, self.model.theta)
+            ## Move:
+            self.forward(1.0)
 
-            ## Directed Walk:
-            elif self.state == 3:
-                ## Use self.gradient_x and self.gradient_y as heading:
-                self.set_heading_vector(self.grad_x, self.grad_y)
+        ## Directed Walk:
+        elif self.state == 3:
+            ## Use self.gradient_x and self.gradient_y as heading:
+            self.set_heading_vector(self.grad_x, self.grad_y)
+            if self.model.noise_in_directed_walk:
+                ## Add noise to heading:
                 self.update_heading(0, (self.model.theta/2))
-                ## Move:
-                self.forward(1.0)
+            ## Move:
+            self.forward(1.0)
     # attempt_move()
 
     ### forward() + helpers ###
@@ -382,6 +417,9 @@ class Bee(mesa.Agent):
     def make_fed(self):
         self.food = 1
         self.hungry = False
+        if self.model.use_queens:
+            self.state = 2      # set to wait state
+            self.timestep = self.emission_frequency - 2
 
     def exchange_food(self, target):
         globals.donor_list.append(self.unique_id)
@@ -396,7 +434,6 @@ class Bee(mesa.Agent):
         self.hungry = False
 
         ## update target's attributes:
-        # target.occupied = True
         target.state = -1           # set target to occupied state
         target.hungry = False
         globals.target_list.append(target.unique_id)
@@ -425,37 +462,37 @@ class Bee(mesa.Agent):
     ######################
     ### Step Functions ###
 
-    def sense_environment(self, env, pheromone_src, pheromone_src_C):
-        ## Look at scents and determine effect
-        # Calculate gradient at agent's position:
-        grad = env.calc_gradient_to_source(self.model.t_i, self.x, self.y, pheromone_src)
+    # def sense_environment(self, env, pheromone_src, pheromone_src_C):
+    #     ## Look at scents and determine effect
+    #     # Calculate gradient at agent's position:
+    #     grad = env.calc_gradient_to_source(self.model.t_i, self.x, self.y, pheromone_src)
 
-        ## Calc concentration at bee.x, bee.y
-        x_bee = self.model.environment.convert_xy_to_index(self.x)
-        y_bee = self.model.environment.convert_xy_to_index(self.y)
-        concentration_at_bee = pheromone_src_C[int(y_bee), int(x_bee)]
+    #     ## Calc concentration at bee.x, bee.y
+    #     x_bee = self.model.environment.convert_xy_to_index(self.x)
+    #     y_bee = self.model.environment.convert_xy_to_index(self.y)
+    #     concentration_at_bee = pheromone_src_C[int(y_bee), int(x_bee)]
 
-        ## Omit very low sources, threshold at lowest T in search:
-        if concentration_at_bee > 1e-3:
-            ## Calc distance between bee
-            self_bee_position = np.array([x_bee, y_bee])
+    #     ## Omit very low sources, threshold at lowest T in search:
+    #     if concentration_at_bee > 1e-3:
+    #         ## Calc distance between bee
+    #         self_bee_position = np.array([x_bee, y_bee])
 
-            x_bee_src = self.model.environment.convert_xy_to_index(pheromone_src['x'])
-            y_bee_src = self.model.environment.convert_xy_to_index(pheromone_src['y'])
+    #         x_bee_src = self.model.environment.convert_xy_to_index(pheromone_src['x'])
+    #         y_bee_src = self.model.environment.convert_xy_to_index(pheromone_src['y'])
 
-            src_bee_position = np.array([x_bee_src, y_bee_src])
+    #         src_bee_position = np.array([x_bee_src, y_bee_src])
 
-            distance_between_bees = np.linalg.norm(src_bee_position-self_bee_position)
+    #         distance_between_bees = np.linalg.norm(src_bee_position-self_bee_position)
 
-            ## Update bee's sensations:
-            sensation = {
-                "bee_id": pheromone_src['bee_id'],
-                "C": concentration_at_bee,
-                "grad": grad,
-                "distance": distance_between_bees
-            }
-            self.sensations.append(sensation)
-    # sense_environment()
+    #         ## Update bee's sensations:
+    #         sensation = {
+    #             "bee_id": pheromone_src['bee_id'],
+    #             "C": concentration_at_bee,
+    #             "grad": grad,
+    #             "distance": distance_between_bees
+    #         }
+    #         self.sensations.append(sensation)
+    # # sense_environment()
 
     ##########################
     #### Update Functions ####
@@ -480,11 +517,11 @@ class Bee(mesa.Agent):
                 self.state = 0      # go to random walk
 
         ## If currently scenting case:
-        elif self.state == 4:
+        elif self.state == 1 or self.state == 4:
             if self.timestep < self.emission_frequency*0.7:
                 self.timestep += 1     # increment counter
             else:
-                if self.model.fed_scent_move:
+                if self.model.fed_skip_wait:
                     self.next_state = 0     # next state = random walk
                 else:
                     self.next_state = 2     # next state = wait
@@ -502,6 +539,10 @@ class Bee(mesa.Agent):
         if self.next_state == None:
             self.next_state = self.state
 
+        ## SPECIAL MODE: fed bees are stationary while emitting pheromones
+        if self.next_state == 4 and self.model.fed_cant_move:
+            self.next_state = 1
+
         ## Remove scenting velocity (want even spread):
         self.wx = 0
         self.wy = 0
@@ -509,15 +550,46 @@ class Bee(mesa.Agent):
         self.grad_x = 0
         self.grad_y = 0
 
+        # #### TO BE REMOVED LATER ####
+        # self.grad_x_old = 0
+        # self.grad_y_old = 0
+        # #### ################### ####
+
         # ## Update state:
         # self.state = self.next_state
     # fed_update()
 
+    def queen_update(self):                 ## update for Special Mode -> [ use_queens = True ]
+        ## queen update function
+        self.prev_state = self.state
+        self.next_state = None
+
+        ## Only swap between wait and emit states:
+        if self.state == 1:
+            if self.timestep < self.emission_frequency*0.7:
+                self.timestep += 1     # increment counter
+            else:
+                self.next_state = 2     # next state = wait
+        elif self.state == 2:
+            if self.timestep < self.emission_frequency:
+                self.timestep += 1
+            else:
+                self.timestep = 0
+                self.next_state = 1      # go to emit
+        else:
+            print("ERROR: queen_update() [1] - invalid queen state ("+str(self.state)+"), setting to 2")
+            self.next_state = 2
+
+        ## Check if state hasn't changed:
+        if self.next_state == None:
+            self.next_state = self.state
+    # queen_update()
+
     def update(self):
-        # if self.sensitivity_mode == 'none':
-        self.__determine_sensation_effects_mode_1()
-        # elif self.sensitivity_mode == 'queen_worker':
-        #     self.__determine_sensation_effects_mode_2()
+        # if self.sensitivity_mode == 0:
+        # self.__determine_sensation_effects_mode_1()         # [CHANGE THIS]
+        # elif self.sensitivity_mode == 1:
+        self.__determine_sensation_effects_mode_2()
         # elif self.sensitivity_mode == 'all':
         #     self.__determine_sensation_effects_mode_3()
 
@@ -527,13 +599,21 @@ class Bee(mesa.Agent):
             # Don't compute gradient and bias when emitting
             # Compute when emitting is over
             if self.state != 1 and self.state != -1:
-                # print(" -2")
-                self.__update_gradient(self.total_grads)
+                # self.__update_gradient_old(self.total_grads_old)        ## [old version -> REMOVE]
+                # self.__normalize_gradient_old()
+
+                self.__update_gradient()
                 self.__normalize_gradient()
                 self.__update_bias()
                 # self.__check_src_contributions()        # Not really used for anything
         else:
             self.threshold_met = False
+
+        if self.dont_move:
+            self.threshold_met = True
+            self.grad_x = 1
+            self.grad_y = 0
+            self.__update_bias()
 
         ## Update state:
         self.__update_state()
@@ -541,22 +621,53 @@ class Bee(mesa.Agent):
 
     #### Update Helpers ####
 
-    def __determine_sensation_effects_mode_1(self):
-        """
-            # 1. No distinction between any bees (e.g., pheromones from queen are treated equal to workers)
-        """
-        self.total_C = 0
-        self.total_grads = np.array([0.0, 0.0])
-        for sensation in self.sensations:
-            self.total_C += sensation['C']
-            self.total_grads += np.array(sensation['grad'])
-    # __determine_sensation_effects_mode_1()
+    # def __determine_sensation_effects_mode_1(self):
+    #     """
+    #         # 1. No distinction between any bees (e.g., pheromones from queen are treated equal to workers)
+    #     """
+    #     self.total_C_old = 0
+    #     self.total_grads_old = np.array([0.0, 0.0])
+    #     for sensation in self.sensations:
+    #         self.total_C_old += sensation['C']
+    #         self.total_grads_old += np.array(sensation['grad'])
+    # # __determine_sensation_effects_mode_1()
 
-    def __update_gradient(self, grad):
-        grad_x, grad_y = grad
-        self.grad_x += grad_x
-        self.grad_y += grad_y
+    def __determine_sensation_effects_mode_2(self):
+        """
+            # version 2: uses np.gradient and concentration map value
+        """
+        self.total_C = self.model.environment.concentration_map[round(self.y*10.0)][round(self.x*10.0)]
+        self.total_grads = self.model.environment.calc_gradient_at_point_2(self.x, self.y)
+    # __determine_sensation_effects_mode_2()
+
+    # def __determine_sensation_effects_mode_3(self):
+    #     """
+    #         # version 3: specifically for scenting test with 1 bee
+    #     """
+    #     if self.state != 1:
+    #         self.total_C = 100
+    #         self.total_grads = 
+    #     else:
+    #         self.total_C = self.model.environment.concentration_map[round(self.y*10.0)][round(self.x*10.0)]
+    #         self.total_grads = self.model.environment.calc_gradient_at_point_2(self.x, self.y)
+    # # __determine_sensation_effects_mode_2()
+
+    # def __update_gradient_old(self, grad):        # [old version -> REMOVE?]
+    #     grad_x_, grad_y_ = grad
+    #     self.grad_x_old += grad_x_
+    #     self.grad_y_old += grad_y_
+
+    def __update_gradient(self):
+        gx, gy = self.model.environment.calc_gradient_at_point_2(self.x, self.y)
+        self.grad_x = gx
+        self.grad_y = gy
     # __update_gradient()
+
+    # def __normalize_gradient_old(self):                         # [old version -> REMOVE]
+    #     d = np.linalg.norm([self.grad_x_old, self.grad_y_old])
+    #     self.grad_x_old = self.grad_x_old / (d + 1e-9)
+    #     self.grad_y_old = self.grad_y_old / (d + 1e-9)
+    # # __normalize_gradient_old()
 
     def __normalize_gradient(self):
         d = np.linalg.norm([self.grad_x, self.grad_y])
@@ -569,13 +680,13 @@ class Bee(mesa.Agent):
         self.wy = -self.grad_y
     # __update_bias()
 
-    def __check_src_contributions(self):
-        self.Cs = []
-        self.distances = []
-        for sensation in self.sensations:
-            self.Cs.append(sensation['C'])
-            self.distances.append(sensation['distance'])
-    # __check_src_contributions()
+    # def __check_src_contributions(self):
+    #     self.Cs = []
+    #     # self.distances = []                                           [REMOVE?]
+    #     for sensation in self.sensations:
+    #         self.Cs.append(sensation['C'])
+    #         # self.distances.append(sensation['distance'])              [REMOVE?]
+    # # __check_src_contributions()
 
     ##########################
     ###### Update State ######
@@ -597,13 +708,14 @@ class Bee(mesa.Agent):
         if self.state == -1:
             if self.counts > 0:     # increment counter
                 self.counts -= 1
+                self.next_state = -1
             else:
                 self.next_state = 0     # go to random walk if done
 
         ## Random Walk Pre/Post Case:
         elif self.threshold_met and self.state == 0: # or self.state == 1):
             random_draw = np.random.uniform(0,1)
-            if random_draw <= self.trans_prob:
+            if random_draw <= self.trans_prob and self.model.num_scenting < self.model.max_scenting_bees:   ## [ REMOVE/change num_scenting limit ]
                 self.next_state = 1         # emit
                 self.wait_timestep = 0
             else:
@@ -613,33 +725,29 @@ class Bee(mesa.Agent):
         ## scent for half (or whatever fraction) of wait_period, and
         ##  for the rest wait in place for pheromone to decay..
         elif self.state == 1:
-            # if self.wait_period*0.5 <= self.wait_timestep <= self.wait_period:
-            if self.wait_period*0.7 <= self.wait_timestep <= self.wait_period:
-                self.next_state = 2         # wait
+            if self.wait_period*0.5 <= self.wait_timestep <= self.wait_period:
+                self.next_state = 2         ## go to wait state (2)
             self.wait_timestep += 1
 
         ################## Only Wait for 1 Timestep ###########
         ## Wait Case:  Agent stands still
         ##  so we don't need emit_final state to resume calculating gradient
         elif self.state == 2:
-            if self.wait_timestep > 0: # self.wait_period:
+            # if self.wait_timestep > 0:
+            if self.wait_timestep > self.wait_period:
                 self.next_state = 3         # directed walk
             self.wait_timestep += 1
         #######################################################
 
         ## Directed Walk case:
         elif self.state == 3:
-            if self.threshold_met:
+            if self.threshold_met and self.model.num_scenting < self.model.max_scenting_bees:   ## [ REMOVE/change num_scenting limit ]
                 random_draw = np.random.uniform(0,1)
                 if random_draw <= self.trans_prob:
                     self.next_state = 1         # emit
                     self.wait_timestep = 0
             else:
                 self.next_state = 0 #1     # random walk post
-
-        ## Inactive Case
-        elif self.state == -1:
-            self.next_state = -1
 
         ## Check if state hasn't changed:
         if self.next_state is None:
@@ -652,7 +760,7 @@ class Bee(mesa.Agent):
     def __clear(self):
         self.grad_x = 0
         self.grad_y = 0
-        self.sensations = []
+        # self.sensations = []
     # clear()
 
 # Class Bee()

@@ -2,12 +2,16 @@ import numpy as np
 
 class Environment(object):
 
-    def __init__(self, x_min, x_max, dx, dec_rate=0.0, dc=0.6, del_t=0.005):
+    def __init__(self, x_min, x_max, dx, dec_rate=0.0, dc=0.6, del_t=0.005, cull_thresh=0.0001):
         ## Grid Values:
         self.x_min = x_min  # 0
         self.x_max = x_max  # 32
         self.dx = dx        # 0.1
-        self.culling_threshold = 0.01 #0.001    # 0.0001
+
+        ## Culling Threshold:
+        #  - 0.0001 default
+        #  - increase to 0.0005 (want to make sim run faster)
+        self.culling_threshold = cull_thresh #0.0001 #0.5 #0.001    # 0.0001
 
         ## Diffusion Values:
         self.decay_rate = dec_rate    # 5.0   # decay rate: (18.0)
@@ -71,8 +75,11 @@ class Environment(object):
                                            wbv = src['wb'] * src['wy'],
                                            t = delta_t)
             ## If diffusion > threshold: Keep the index:
-            if current_c.any() > self.culling_threshold:
+            # if current_c.any() > self.culling_threshold:
+            if True in (current_c > self.culling_threshold) or (src['bee_id'] == 0 and (t_i - src['t_start'] < 80)):   # (add any other conditions to keep specific bees' pheromones)
                 keep_idxs.append(pheromone_src_i)
+            # else:
+            #     print(f" - Culled pheromone: {np.max(current_c)}")# {np.max(current_c)}")
         count = len(self.pheromone_sources) - len(keep_idxs)
         ## Remove old sources:
         self.pheromone_sources = list(np.array(self.pheromone_sources)[keep_idxs])
@@ -93,8 +100,8 @@ class Environment(object):
         term_1 = (A) / (D * t)
         term_2 = (X - wbu * t)**2 + (Y - wbv * t)**2
         denom = 4 * D * t
-        # c = term_1 * np.exp(-(term_2 / denom) - (self.decay_rate * t))
-        c = term_1 * np.exp(-(term_2 / denom))
+        c = term_1 * np.exp(-(term_2 / denom) - (self.decay_rate * t))
+        # c = term_1 * np.exp(-(term_2 / denom))
         return c
     # _diffusion_eq()
 
@@ -167,26 +174,69 @@ class Environment(object):
         return dx, dy
     # calc_gradient_to_source()
 
-    # def calc_gradient_at_point(self, x, y, t_i):
-    #     ## Calculate the total gradient at point (x,y)
-    #     grad_x = 0
-    #     grad_y = 0
-    #     ## Iterate through sources:
-    #     for src in self.pheromone_sources:
-    #         ## Find gradient from source and add to total gradient:
-    #         dx, dy = self.__calc_gradient_to_source(t_i, x, y, src)
-    #         grad_x += dx
-    #         grad_y += dy
-    #     return grad_x, grad_y       # return total gradient at point (x,y)
+    # def calc_gradient_at_point(self, x, y):
+    #     """
+    #     Return the spatial gradient (dC/dx, dC/dy) of the current
+    #     `self.concentration_map` at physical coordinates (x, y).
+
+    #     Uses a central-difference computed via `np.gradient` to build
+    #     gradient fields on the grid, then bilinearly interpolates the
+    #     gradient fields to the requested (x,y) point.
+
+    #     Returns (grad_x, grad_y).
+    #     """
+    #     if not hasattr(self, 'concentration_map'):
+    #         raise AttributeError('concentration_map not initialized; call init_concentration_map() first')
+
+    #     # Compute gradient fields. np.gradient returns gradient along
+    #     # axis 0 (rows / y) then axis 1 (cols / x). Provide spacing
+    #     # equal to self.dx for both axes to get spatial derivatives.
+    #     grad_y_field, grad_x_field = np.gradient(self.concentration_map, self.dx, self.dx)
+
+    #     nrows, ncols = self.concentration_map.shape
+
+    #     ## scale x,y to match grid indices (0.1 spacing)
+    #     x = x*10.0
+    #     y = y*10.0
+
+    #     # Convert physical coordinates to fractional array indices
+    #     # row corresponds to y, col corresponds to x
+    #     row_f = (y - self.x_min) / self.dx
+    #     col_f = (x - self.x_min) / self.dx
+
+    #     # Clamp to valid range
+    #     row_f = np.clip(row_f, 0.0, float(nrows - 1))
+    #     col_f = np.clip(col_f, 0.0, float(ncols - 1))
+
+    #     i0 = int(np.floor(row_f))
+    #     j0 = int(np.floor(col_f))
+    #     i1 = min(i0 + 1, nrows - 1)
+    #     j1 = min(j0 + 1, ncols - 1)
+
+    #     wy = row_f - i0
+    #     wx = col_f - j0
+
+    #     # Bilinear interpolation helper
+    #     def _bilinear(field):
+    #         return (
+    #             (1 - wy) * (1 - wx) * field[i0, j0]
+    #             + (1 - wy) * wx * field[i0, j1]
+    #             + wy * (1 - wx) * field[i1, j0]
+    #             + wy * wx * field[i1, j1]
+    #         )
+
+    #     grad_x = _bilinear(grad_x_field)
+    #     grad_y = _bilinear(grad_y_field)
+
+    #     return grad_x, grad_y
     # # calc_gradient_at_point()
 
-    # def calc_gradient_at_point_2(self, x, y, t_i):
-    #     ## This version uses Numpy's gradient() method:
-    #     dxx, dyy = np.gradient(map, 0.1)                # change to "self.concentration_map" ?
-    #     dx = dxx[int(self.convert_xy_to_index(x))]
-    #     dy = dyy[int(self.convert_xy_to_index(y))]
-    #     return dx, dy
-    # # calc_gradient_at_point_2()
+    def calc_gradient_at_point_2(self, x, y):
+        grads_y, grads_x = np.gradient(self.concentration_map, self.dx, self.dx)
+        gx2 = grads_x[round(y*10.0), round(x*10.0)]
+        gy2 = grads_y[round(y*10.0), round(x*10.0)]
+        return gx2, gy2
+    # calc_gradient_2()
 
     ################
     ### Helpers: ###

@@ -54,7 +54,7 @@ class Bee(mesa.Agent):
         # state and flags
         self.state = 0
         self.next_state = None
-        self.is_queen = False
+        # self.is_queen = False         # [ REMOVE? ]
         self.emitting = False
         self.threshold_met = False
         # other:
@@ -89,6 +89,10 @@ class Bee(mesa.Agent):
             else:
                 self.occupied = False
                 self.attempt_move()
+            if self.model.disable_trophallaxis:
+                print("ERROR: step() -> agent is occupied")
+        elif self.model.disable_trophallaxis:        ## MODE: disable food exchange
+            self.attempt_move()
         else:   # occupied = false
             self.nearby_agents, self.dist_to_neighbors = self.get_neighbors(1.1)
             if len(self.nearby_agents) > 0:
@@ -538,14 +542,14 @@ class Bee(mesa.Agent):
     #######################
 
     def update(self):
-        if self.is_queen:   # special if queen
-            if self.food <= 0.09:
-                self.state = 0
-            else:
-                self.state = 2 if self.timestep < self.emission_frequency*0.7 else 3
-            self.wx = 0
-            self.wy = 0
-            return
+        # if self.is_queen:   # special if queen            [ REMOVE? ]
+        #     if self.food <= 0.09:
+        #         self.state = 0
+        #     else:
+        #         self.state = 2 if self.timestep < self.emission_frequency*0.7 else 3
+        #     self.wx = 0
+        #     self.wy = 0
+        #     return
 
         # if self.sensitivity_mode == 'none':
         self.__determine_sensation_effects_mode_1()

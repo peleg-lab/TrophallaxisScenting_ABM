@@ -1,5 +1,21 @@
 """# Global Variables"""
 
+IS_LOCAL = True
+
+peleg_path_main = "/Volumes/peleg-group-2/Richard/"
+peleg_path_code = "troph_scenting_model/model_scripts"
+peleg_path_data = "troph_code_data/"
+
+scratch_path_dir = "/scratch/isilon/rite5632/troph_data/"
+scratch_path_code = "/scratch/isilon/rite5632/slurm/"
+
+baffin_local_dir = "P:/Richard/baffin_server/baffin_data/troph_data/"
+baffin_local_code = "P:/Richard/baffin_server/"
+
+local_path_main = "/Users/richard/Documents/trophallaxis_local/"
+local_path_code = "model_scripts/"
+local_path_data = "data/"
+
 tro_counter = 0     # counts # of trophallaxis events
 all_counter = 0
 n1_counter = 0      # counts every neighboring event if the neighbors have different food values
